@@ -1,0 +1,40 @@
+FROM quay.io/fedora/fedora:40 as builder
+
+ARG SYMPHONY_URL=https://github.com/eclipse-symphony/symphony.git
+ARG SYMPHONY_VER=0.48.22
+ARG SYMPHONY_SRC_DIR=/tmp/symphony
+ARG SYMPHONY_BUIL_DIR=/tmp/symphony-build
+
+# Get source and top level dependencies
+RUN dnf install -y git
+RUN git clone -b ${SYMPHONY_VER} ${SYMPHONY_URL} ${SYMPHONY_SRC_DIR}
+
+# api build
+RUN dnf install -y go
+WORKDIR ${SYMPHONY_SRC_DIR}/api
+RUN go build -o ${SYMPHONY_BUILD_DIR}/symphony-api && \
+cp symphony-api.json ${SYMPHONY_BUILD_DIR}/symphony-api.json
+
+# cli build
+RUN dnf install -y go
+WORKDIR ${SYMPHONY_SRC_DIR}/cli
+RUN go build -o ${SYMPHONY_BUILD_DIR}/symphony-cli
+
+# operator build
+RUN dnf install -y go
+WORKDIR ${SYMPHONY_SRC_DIR}/k8s
+RUN go build -o ${SYMPHONY_BUILD_DIR}/symphony-k8s-manager
+
+# agent build
+RUN dnf install -y cargo perl-FindBin perl-File-Compare rust
+WORKDIR ${SYMPHONY_SRC_DIR}/agent
+RUN cargo build --release && \
+cp target/release/piccolo ${SYMPHONY_BUILD_DIR}/symphony-agent-piccolo
+
+FROM quay.io/fedora/fedora:40
+
+COPY --from=builder ${SYMPHONY_BUILD_DIR}/symphony-api.json /etc/symphony/symphony-api.json
+COPY --from=builder ${SYMPHONY_BUILD_DIR}/symphony-api /usr/bin/symphony-api
+COPY --from=builder ${SYMPHONY_BUILD_DIR}/symphony-cli /usr/bin/symphony-cli
+COPY --from=builder ${SYMPHONY_BUILD_DIR}/symphony-k8s-manager /usr/bin/symphony-k8s-manager
+COPY --from=builder ${SYMPHONY_BUILD_DIR}/symphony-agent-piccolo /usr/bin/symphony-agent-piccolo
